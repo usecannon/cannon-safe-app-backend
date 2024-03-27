@@ -2,6 +2,9 @@ import _ from 'lodash'
 import express from 'express'
 import morgan from 'morgan'
 import { ethers } from 'ethers'
+import * as viemChains from 'viem/chains'
+
+const chains = Object.values(viemChains)
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const SafeABI = require('./abi/Safe.json')
@@ -26,13 +29,30 @@ type StagedTransaction = {
 
 async function start() {
   const txdb = new Map<string, StagedTransaction[]>()
-
-  const providers = new Map<bigint, ethers.Provider>()
+  const providers = new Map<number, ethers.Provider>()
 
   for (const rpcUrl of process.env.RPC_URLS?.split(',') || []) {
     const provider = new ethers.JsonRpcProvider(rpcUrl)
-    const networkInfo = await provider.getNetwork()
-    providers.set(networkInfo.chainId, provider)
+    const { chainId } = await provider.getNetwork()
+    providers.set(Number(`${chainId}`), provider)
+  }
+
+  function getProvider(chainId: string | number | bigint) {
+    const id = Number(`${chainId}`)
+    const provider = providers.get(id)
+
+    if (provider) return provider
+
+    const chain = chains.find((chain) => chain.id === id)
+    if (!chain) return null
+    const rpcUrl = chain.rpcUrls.default.http[0]
+    if (!rpcUrl) return null
+
+    const newProvider = new ethers.JsonRpcProvider(rpcUrl)
+
+    providers.set(id, newProvider)
+
+    return newProvider
   }
 
   function getSafeKey(chainId: number, safeAddress: string) {
@@ -51,33 +71,46 @@ async function start() {
     next()
   })
 
-  app.get('/:chainId/:safeAddress', async (req, res) => {
-    res.send(
-      txdb.get(
-        getSafeKey(parseInt(req.params.chainId), req.params.safeAddress)
-      ) || []
-    )
+  function parseSafeParams(params: { chainId: string, safeAddress: string }) {
+    const chainId = Number.parseInt(params.chainId)
+    if (!Number.isSafeInteger(chainId) || chainId < 1) return {};
+    if (!ethers.isAddress(params.safeAddress)) return {};
+    const safeAddress = ethers.getAddress(params.safeAddress.toLowerCase())
+    return { chainId, safeAddress };
+  }
+
+  app.get('/:chainId/:safeAddress', (req, res) => {
+    const { chainId, safeAddress } = parseSafeParams(req.params)
+
+    if (!chainId || !safeAddress) {
+      return res.status(400).send('invalid chain id or safe address')
+    }
+
+    res.send(txdb.get(getSafeKey(chainId, safeAddress)) || [])
   })
 
   app.post('/:chainId/:safeAddress', async (req, res) => {
+    const { chainId, safeAddress } = parseSafeParams(req.params)
+
+    if (!chainId || !safeAddress) {
+      return res.status(400).send('invalid chain id or safe address')
+    }
+
     try {
       const signedTransactionInfo: StagedTransaction = req.body
-
-      const chainId = parseInt(req.params.chainId)
-
-      const provider = providers.get(BigInt(chainId))
+      const provider = getProvider(chainId)
 
       if (!provider) {
         return res.status(400).send('chain id not supported')
       }
 
       const safe = new ethers.Contract(
-        req.params.safeAddress,
+        safeAddress,
         SafeABI,
         provider
       )
 
-      const txs = txdb.get(getSafeKey(chainId, req.params.safeAddress)) || []
+      const txs = txdb.get(getSafeKey(chainId, safeAddress)) || []
 
       const existingTx = txs.find(
         (tx) => JSON.stringify(tx.txn) == JSON.stringify(signedTransactionInfo)
@@ -144,10 +177,10 @@ async function start() {
       txs.push(signedTransactionInfo)
 
       txdb.set(
-        getSafeKey(chainId, req.params.safeAddress),
+        getSafeKey(chainId, safeAddress),
         // briefly clean up any txns that are less than current nonce, and any transactions with dup hashes to this one
-        txs.filter((t) => 
-        t.txn._nonce >= currentNonce && 
+        txs.filter((t) =>
+        t.txn._nonce >= currentNonce &&
         (t === signedTransactionInfo || !_.isEqual(t.txn, signedTransactionInfo.txn)))
       )
 
