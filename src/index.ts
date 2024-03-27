@@ -191,8 +191,10 @@ async function start() {
     }
   })
 
-  app.listen(parseInt(process.env.PORT || '3000'), () => {
-    console.log('started')
+  const PORT = parseInt(process.env.PORT || '3000')
+
+  app.listen(PORT, () => {
+    console.log(`started on port ${PORT}`)
     console.log('registered networks:', Array.from(providers.keys()).join(' '))
   })
 }
