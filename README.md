@@ -14,12 +14,19 @@ npm run build
 
 Once the project is built, you can run it:
 ```
-RPC_URLS=https://mainnet.infura.io/abc123,https://optimism.infura.io/abc123 node dist/index.js
+node dist/index.js
 ```
-
-The `RPC_URLS` environment variable is a comma separated list of RPC endpoints for all the networks your gnosis safes are deployed on.
 
 We also provide a docker image if you prefer:
 ```
 docker run -it --rm ghcr.io/usecannon/safe-cannon-app-backend -e RPC_URLS=...
+```
+
+### Custom RPC endpoints
+
+The `RPC_URLS` environment variable is an optional comma separated list of RPC
+endpoints for the networks you wan't to include that are not listed by [viem](https://viem.sh/docs/chains/introduction.html).
+
+```
+RPC_URLS=https://mainnet.infura.io/abc123,https://optimism.infura.io/abc123 node dist/index.js
 ```
