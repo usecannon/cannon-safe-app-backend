@@ -27,6 +27,11 @@ type StagedTransaction = {
   sigs: string[]
 }
 
+// arbitrary limits to harden the server a bit
+const MAX_SIGS = 100
+const MAX_TXNS_STAGED = 100
+const MAX_TXDATA_SIZE = 1000000
+
 async function start() {
   const txdb = new Map<string, StagedTransaction[]>()
   const providers = new Map<number, ethers.Provider>()
@@ -86,7 +91,7 @@ async function start() {
       return res.status(400).send('invalid chain id or safe address')
     }
 
-    res.send(txdb.get(getSafeKey(chainId, safeAddress)) || [])
+    res.send(_.sortBy(Array.from(txdb.get(getSafeKey(chainId, safeAddress)) || new Map()), t => t._nonce))
   })
 
   app.post('/:chainId/:safeAddress', async (req, res) => {
@@ -94,6 +99,10 @@ async function start() {
 
     if (!chainId || !safeAddress) {
       return res.status(400).send('invalid chain id or safe address')
+    }
+
+    if (JSON.stringify(req.body) > MAX_TXDATA_SIZE) {
+      return res.status(400).send('txn too large')
     }
 
     try {
@@ -110,15 +119,34 @@ async function start() {
         provider
       )
 
-      const txs = txdb.get(getSafeKey(chainId, safeAddress)) || []
+      const txs = txdb.get(getSafeKey(chainId, safeAddress)) || new Map()
 
-      const existingTx = txs.find(
-        (tx) => JSON.stringify(tx.txn) == JSON.stringify(signedTransactionInfo)
+      // verify all sigs are valid
+      const hashData = await safe.encodeTransactionData(
+        signedTransactionInfo.txn.to,
+        signedTransactionInfo.txn.value,
+        signedTransactionInfo.txn.data,
+        signedTransactionInfo.txn.operation,
+        signedTransactionInfo.txn.safeTxGas,
+        signedTransactionInfo.txn.baseGas,
+        signedTransactionInfo.txn.gasPrice,
+        signedTransactionInfo.txn.gasToken,
+        signedTransactionInfo.txn.refundReceiver,
+        signedTransactionInfo.txn._nonce
       )
+
+      const existingTx = txs.get(hashData)
 
       const currentNonce: bigint = await safe.nonce()
 
       if (!existingTx) {
+        if (txs.length > MAX_TXNS_STAGED) {
+          return res
+            .status(400)
+            .send(
+              'maximum staged signatures for this safe'
+            )
+        }
         // verify the new txn will work on what we know about the safe right now
 
         if (signedTransactionInfo.txn._nonce < currentNonce) {
@@ -140,27 +168,21 @@ async function start() {
             )
         }
       } else {
-        // verify that new signers list is longer than old signers list
-        if (existingTx.sigs.length >= signedTransactionInfo.sigs.length) {
+        // its possible if two or more people sign transactions at the same time, they will have separate lists, and so they need to be merged together.
+        // we also sort the signatures for the user here so that isnt a requirement when submitting signatures to this service
+        signedTransactionInfo.sigs = _.sortBy(
+          _.union(signedTransactionInfo.sigs, existingTx.sigs), 
+          (signature) => viem.recoverAddress({ hash: hashData, signature }).toLowerCase()
+        )
+
+        if (signedTransactionInfo.sigs.length > MAX_SIGS) {
           return res
             .status(400)
-            .send('new sigs count must be greater than old sigs count')
+            .send(
+              'maximum signatures reached for transaction'
+            )
         }
       }
-
-      // verify all sigs are valid
-      const hashData = await safe.encodeTransactionData(
-        signedTransactionInfo.txn.to,
-        signedTransactionInfo.txn.value,
-        signedTransactionInfo.txn.data,
-        signedTransactionInfo.txn.operation,
-        signedTransactionInfo.txn.safeTxGas,
-        signedTransactionInfo.txn.baseGas,
-        signedTransactionInfo.txn.gasPrice,
-        signedTransactionInfo.txn.gasToken,
-        signedTransactionInfo.txn.refundReceiver,
-        signedTransactionInfo.txn._nonce
-      )
 
       try {
         await safe.checkNSignatures(
@@ -174,17 +196,21 @@ async function start() {
         return res.status(400).send('invalid signature')
       }
 
-      txs.push(signedTransactionInfo)
+      txs.put(hashData, signedTransactionInfo)
+
+      // briefly clean up any txns that are less than current nonce, and any transactions with dup hashes to this one
+      for (const [h, t] of txs.entries()) {
+        if (t.txn._nonce < currentNonce || (t !== signedTransactionInfo && _.isEqual(t.txn, signedTransactionInfo.txn))) {
+          txs.delete(h)
+        }
+      }
 
       txdb.set(
         getSafeKey(chainId, safeAddress),
-        // briefly clean up any txns that are less than current nonce, and any transactions with dup hashes to this one
-        txs.filter((t) =>
-        t.txn._nonce >= currentNonce &&
-        (t === signedTransactionInfo || !_.isEqual(t.txn, signedTransactionInfo.txn)))
+        txs
       )
 
-      res.send(txs)
+      res.send(_.sortBy(Array.from(txs.values()), t => t._nonce))
     } catch (err) {
       console.error('caught failure in transaction post', err)
       res.status(500).end('unexpected error, please check server logs')
