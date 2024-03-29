@@ -3,7 +3,6 @@ import express from "express";
 import morgan from "morgan";
 import { ethers } from "ethers";
 import * as viemChains from "viem/chains";
-import * as viem from "viem";
 
 import SafeABI from "./abi/Safe.json";
 
