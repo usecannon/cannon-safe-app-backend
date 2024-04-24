@@ -177,7 +177,7 @@ async function start() {
 						return ethers
 							.recoverAddress(
 								ethers.hashMessage(ethers.getBytes(digest)),
-								ethers.toQuantity(signatureBytes),
+								ethers.hexlify(signatureBytes),
 							)
 							.toLowerCase();
 					},
