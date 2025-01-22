@@ -107,13 +107,10 @@ async function start() {
     return { chainId, safeAddress };
   }
 
-  app.get("/:chainId/:safeAddress", async (req, res) => {
-    const { chainId, safeAddress } = parseSafeParams(req.params);
-
-    if (!chainId || !safeAddress) {
-      return res.status(400).send("invalid chain id or safe address");
-    }
-
+  async function loadWithPersistenceFallback(
+    chainId: number,
+    safeAddress: string,
+  ) {
     const k = getSafeKey(chainId, safeAddress);
 
     // if we dont have the data locally, see if it is on the (optional) persisted database
@@ -130,7 +127,15 @@ async function start() {
       }
     }
 
-    const dbTxs = txdb.get(k)?.values();
+    return txdb.get(k);
+  }
+
+  app.get("/:chainId/:safeAddress", async (req, res) => {
+    const { chainId, safeAddress } = parseSafeParams(req.params);
+
+    const dbTxs = (
+      await loadWithPersistenceFallback(chainId!, safeAddress!)
+    )?.values();
 
     res.send(_.sortBy(Array.from(dbTxs ?? []), (t) => t.txn._nonce));
   });
@@ -156,7 +161,8 @@ async function start() {
 
       const safe = new ethers.Contract(safeAddress, SafeABI, provider);
 
-      const txs = txdb.get(getSafeKey(chainId, safeAddress)) || new Map();
+      const txs =
+        (await loadWithPersistenceFallback(chainId, safeAddress)) || new Map();
 
       // verify all sigs are valid
       const hashData = await safe.encodeTransactionData(
