@@ -20,7 +20,7 @@ pnpm start
 We also provide a docker image if you prefer:
 
 ```
-docker run -it --rm ghcr.io/usecannon/safe-cannon-app-backend -e RPC_URLS=...
+docker run -it --rm ghcr.io/usecannon/safe-app-backend -e RPC_URLS=...
 ```
 
 ### Custom RPC endpoints
