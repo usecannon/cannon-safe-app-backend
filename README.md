@@ -1,4 +1,4 @@
-# backend
+# Safe App Backend
 
 This is effectively a replacement for the [safe-transaction-service](https://github.com/safe-global/safe-transaction-service) which only provides the required capability of accumulating signatures ready for execution. it is designed to be easy to run independently even if all you have is an rpc endpoint.
 
