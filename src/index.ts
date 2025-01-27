@@ -5,6 +5,7 @@ import morgan from 'morgan';
 import { ethers } from 'ethers';
 import * as viemChains from 'viem/chains';
 import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 import SafeABI from './abi/Safe.json';
 import packageJson from '../package.json';
 
@@ -94,6 +95,7 @@ async function start() {
 
   app.use(morgan('tiny'));
   app.use(express.json());
+  app.use(helmet());
 
   app.get('/favicon.ico', (req, res) => res.status(204));
 
