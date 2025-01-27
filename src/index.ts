@@ -4,6 +4,7 @@ import Redis from 'ioredis';
 import morgan from 'morgan';
 import { ethers } from 'ethers';
 import * as viemChains from 'viem/chains';
+import rateLimit from 'express-rate-limit';
 import SafeABI from './abi/Safe.json';
 import packageJson from '../package.json';
 
@@ -93,6 +94,18 @@ async function start() {
 
   app.use(morgan('tiny'));
   app.use(express.json());
+
+  app.get('/favicon.ico', (req, res) => res.status(204));
+
+  app.use(
+    rateLimit({
+      windowMs: 1000,
+      limit: 500,
+      standardHeaders: 'draft-7',
+      legacyHeaders: false,
+      validate: { trustProxy: !!process.env.TRUST_PROXY },
+    })
+  );
 
   app.use((_req, res, next) => {
     res.appendHeader('Access-Control-Allow-Origin', '*');
@@ -253,6 +266,32 @@ async function start() {
     } catch (err) {
       console.error('caught failure in transaction post', err);
       res.status(500).end('unexpected error, please check server logs');
+    }
+  });
+
+  let _healthChecking = false;
+  app.get('/health', async (_, res) => {
+    if (_healthChecking) {
+      return res.status(503).json({ status: 'error' });
+    }
+
+    _healthChecking = true;
+
+    try {
+      // Check Redis connection
+      if (rdb) await rdb.ping();
+
+      res.json({
+        status: 'ok',
+        version: packageJson.version,
+      });
+    } catch (err) {
+      console.error('health check failed', err);
+      res.status(503).json({ status: 'error' });
+    } finally {
+      setTimeout(() => {
+        _healthChecking = false;
+      }, 100);
     }
   });
 
