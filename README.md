@@ -7,14 +7,14 @@ This is effectively a replacement for the [safe-transaction-service](https://git
 After checking out the repo, install dependencies and build the project:
 
 ```
-npm i
-npm run build
+pnpm i
+pnpm run build
 ```
 
 Once the project is built, you can run it:
 
 ```
-node dist/index.js
+pnpm start
 ```
 
 We also provide a docker image if you prefer:
