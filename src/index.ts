@@ -1,11 +1,11 @@
-import _ from "lodash";
-import express from "express";
-import Redis from "ioredis";
-import morgan from "morgan";
-import { ethers } from "ethers";
-import * as viemChains from "viem/chains";
+import _ from 'lodash';
+import express from 'express';
+import Redis from 'ioredis';
+import morgan from 'morgan';
+import { ethers } from 'ethers';
+import * as viemChains from 'viem/chains';
 
-import SafeABI from "./abi/Safe.json";
+import SafeABI from './abi/Safe.json';
 
 const chains = Object.values(viemChains);
 
@@ -36,30 +36,26 @@ async function start() {
   const txdb = new Map<string, Map<string, StagedTransaction>>();
   const providers = new Map<number, ethers.Provider>();
 
-  const rdb: Redis | null = process.env.REDIS_URL
-    ? new Redis(process.env.REDIS_URL)
-    : null;
+  const rdb: Redis | null = process.env.REDIS_URL ? new Redis(process.env.REDIS_URL) : null;
 
   if (rdb) {
-    rdb.on("ready", () => {
-      console.log("connected to persistence backend");
+    rdb.on('ready', () => {
+      console.log('connected to persistence backend');
     });
 
-    rdb.on("error", (err) => {
-      console.error("problem with persistence backend", err);
+    rdb.on('error', (err) => {
+      console.error('problem with persistence backend', err);
     });
 
-    rdb.on("close", () => {
-      console.error("persistence backend connection was closed");
+    rdb.on('close', () => {
+      console.error('persistence backend connection was closed');
       process.exit(1);
     });
   } else {
-    console.log(
-      "warn: persistence is *NOT* enabled. To persist your safe transactions, please supply REDIS_URL.",
-    );
+    console.log('warn: persistence is *NOT* enabled. To persist your safe transactions, please supply REDIS_URL.');
   }
 
-  for (const rpcUrl of process.env.RPC_URLS?.split(",") || []) {
+  for (const rpcUrl of process.env.RPC_URLS?.split(',') || []) {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const { chainId } = await provider.getNetwork();
     providers.set(Number(`${chainId}`), provider);
@@ -89,13 +85,13 @@ async function start() {
 
   const app = express();
 
-  app.use(morgan("tiny"));
+  app.use(morgan('tiny'));
   app.use(express.json());
 
   app.use((_req, res, next) => {
-    res.appendHeader("Access-Control-Allow-Origin", "*");
-    res.appendHeader("Access-Control-Allow-Methods", "*");
-    res.appendHeader("Access-Control-Allow-Headers", "*");
+    res.appendHeader('Access-Control-Allow-Origin', '*');
+    res.appendHeader('Access-Control-Allow-Methods', '*');
+    res.appendHeader('Access-Control-Allow-Headers', '*');
     next();
   });
 
@@ -107,17 +103,12 @@ async function start() {
     return { chainId, safeAddress };
   }
 
-  async function loadWithPersistenceFallback(
-    chainId: number,
-    safeAddress: string,
-  ) {
+  async function loadWithPersistenceFallback(chainId: number, safeAddress: string) {
     const k = getSafeKey(chainId, safeAddress);
 
     // if we dont have the data locally, see if it is on the (optional) persisted database
     if (!txdb.has(k) && rdb) {
-      const rawRedisTxs = await rdb.get(
-        "safe-app-backend:" + getSafeKey(chainId, safeAddress),
-      );
+      const rawRedisTxs = await rdb.get('safe-app-backend:' + getSafeKey(chainId, safeAddress));
       if (rawRedisTxs) {
         const loadedMap = new Map();
         for (const [k, v] of JSON.parse(rawRedisTxs)) {
@@ -130,25 +121,23 @@ async function start() {
     return txdb.get(k);
   }
 
-  app.get("/:chainId/:safeAddress", async (req, res) => {
+  app.get('/:chainId/:safeAddress', async (req, res) => {
     const { chainId, safeAddress } = parseSafeParams(req.params);
 
-    const dbTxs = (
-      await loadWithPersistenceFallback(chainId!, safeAddress!)
-    )?.values();
+    const dbTxs = (await loadWithPersistenceFallback(chainId!, safeAddress!))?.values();
 
     res.send(_.sortBy(Array.from(dbTxs ?? []), (t) => t.txn._nonce));
   });
 
-  app.post("/:chainId/:safeAddress", async (req, res) => {
+  app.post('/:chainId/:safeAddress', async (req, res) => {
     const { chainId, safeAddress } = parseSafeParams(req.params);
 
     if (!chainId || !safeAddress) {
-      return res.status(400).send("invalid chain id or safe address");
+      return res.status(400).send('invalid chain id or safe address');
     }
 
     if (JSON.stringify(req.body).length > MAX_TXDATA_SIZE) {
-      return res.status(400).send("txn too large");
+      return res.status(400).send('txn too large');
     }
 
     try {
@@ -156,13 +145,12 @@ async function start() {
       const provider = getProvider(chainId);
 
       if (!provider) {
-        return res.status(400).send("chain id not supported");
+        return res.status(400).send('chain id not supported');
       }
 
       const safe = new ethers.Contract(safeAddress, SafeABI, provider);
 
-      const txs =
-        (await loadWithPersistenceFallback(chainId, safeAddress)) || new Map();
+      const txs = (await loadWithPersistenceFallback(chainId, safeAddress)) || new Map();
 
       // verify all sigs are valid
       const hashData = await safe.encodeTransactionData(
@@ -186,56 +174,38 @@ async function start() {
 
       if (!existingTx) {
         if (txs.size > MAX_TXNS_STAGED) {
-          return res
-            .status(400)
-            .send("maximum staged signatures for this safe");
+          return res.status(400).send('maximum staged signatures for this safe');
         }
         // verify the new txn will work on what we know about the safe right now
 
         if (signedTransactionInfo.txn._nonce < currentNonce) {
-          return res
-            .status(400)
-            .send("proposed nonce is lower than current safe nonce");
+          return res.status(400).send('proposed nonce is lower than current safe nonce');
         }
 
         if (
           signedTransactionInfo.txn._nonce > currentNonce &&
-          !Array.from(txs.values()).find(
-            (tx) => tx.txn._nonce === signedTransactionInfo.txn._nonce - 1,
-          )
+          !Array.from(txs.values()).find((tx) => tx.txn._nonce === signedTransactionInfo.txn._nonce - 1)
         ) {
-          return res
-            .status(400)
-            .send(
-              "proposed nonce is higher than current safe nonce with missing staged",
-            );
+          return res.status(400).send('proposed nonce is higher than current safe nonce with missing staged');
         }
       } else {
         // its possible if two or more people sign transactions at the same time, they will have separate lists, and so they need to be merged together.
         // we also sort the signatures for the user here so that isnt a requirement when submitting signatures to this service
-        signedTransactionInfo.sigs = _.sortBy(
-          _.union(signedTransactionInfo.sigs, existingTx.sigs),
-          (signature) => {
-            const signatureBytes = ethers.getBytes(signature);
+        signedTransactionInfo.sigs = _.sortBy(_.union(signedTransactionInfo.sigs, existingTx.sigs), (signature) => {
+          const signatureBytes = ethers.getBytes(signature);
 
-            // for some reason its often necessary to adjust the version field -4 if its above 30
-            if (_.last(signatureBytes)! > 30) {
-              signatureBytes[signatureBytes.length - 1] -= 4;
-            }
+          // for some reason its often necessary to adjust the version field -4 if its above 30
+          if (_.last(signatureBytes)! > 30) {
+            signatureBytes[signatureBytes.length - 1] -= 4;
+          }
 
-            return ethers
-              .recoverAddress(
-                ethers.hashMessage(ethers.getBytes(digest)),
-                ethers.hexlify(signatureBytes),
-              )
-              .toLowerCase();
-          },
-        );
+          return ethers
+            .recoverAddress(ethers.hashMessage(ethers.getBytes(digest)), ethers.hexlify(signatureBytes))
+            .toLowerCase();
+        });
 
         if (signedTransactionInfo.sigs.length > MAX_SIGS) {
-          return res
-            .status(400)
-            .send("maximum signatures reached for transaction");
+          return res.status(400).send('maximum signatures reached for transaction');
         }
       }
 
@@ -247,19 +217,15 @@ async function start() {
           signedTransactionInfo.sigs.length,
         );
       } catch (err) {
-        console.log("failed checking n signatures", err);
-        return res.status(400).send("invalid signature");
+        console.log('failed checking n signatures', err);
+        return res.status(400).send('invalid signature');
       }
 
       txs.set(digest, signedTransactionInfo);
 
       // briefly clean up any txns that are less than current nonce, and any transactions with dup hashes to this one
       for (const [h, t] of txs.entries()) {
-        if (
-          t.txn._nonce < currentNonce ||
-          (t !== signedTransactionInfo &&
-            _.isEqual(t.txn, signedTransactionInfo.txn))
-        ) {
+        if (t.txn._nonce < currentNonce || (t !== signedTransactionInfo && _.isEqual(t.txn, signedTransactionInfo.txn))) {
           txs.delete(h);
         }
       }
@@ -268,29 +234,27 @@ async function start() {
 
       // save a copy on the (optional) persisted database
       if (rdb) {
+        const key = `safe-app-backend:${getSafeKey(chainId, safeAddress)}`;
         rdb
-          .set(
-            "safe-app-backend:" + getSafeKey(chainId, safeAddress),
-            JSON.stringify(Array.from(txs.entries())),
-          )
+          .set(key, JSON.stringify(Array.from(txs.entries())))
           .then(_.noop)
           .catch((e) => {
-            console.error("problem when persisting safe txdb", e);
+            console.error('problem when persisting safe txdb', e);
           });
       }
 
       res.send(_.sortBy(Array.from(txs.values()), (t) => t._nonce));
     } catch (err) {
-      console.error("caught failure in transaction post", err);
-      res.status(500).end("unexpected error, please check server logs");
+      console.error('caught failure in transaction post', err);
+      res.status(500).end('unexpected error, please check server logs');
     }
   });
 
-  const port = parseInt(process.env.PORT || "3000");
+  const port = parseInt(process.env.PORT || '3000');
 
   app.listen(port, () => {
     console.log(`started on port ${port}`);
-    console.log("registered networks:", Array.from(providers.keys()).join(" "));
+    console.log('registered networks:', Array.from(providers.keys()).join(' '));
   });
 }
 
