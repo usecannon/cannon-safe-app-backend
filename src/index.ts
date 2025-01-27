@@ -4,8 +4,10 @@ import Redis from 'ioredis';
 import morgan from 'morgan';
 import { ethers } from 'ethers';
 import * as viemChains from 'viem/chains';
-
 import SafeABI from './abi/Safe.json';
+import packageJson from '../package.json';
+
+const port = Number.parseInt(process.env.PORT || '8080');
 
 const chains = Object.values(viemChains);
 
@@ -84,6 +86,10 @@ async function start() {
   }
 
   const app = express();
+
+  if (process.env.TRUST_PROXY) {
+    app.enable('trust proxy');
+  }
 
   app.use(morgan('tiny'));
   app.use(express.json());
@@ -250,15 +256,11 @@ async function start() {
     }
   });
 
-  const port = parseInt(process.env.PORT || '3000');
-
   app.listen(port, () => {
-    console.log(`started on port ${port}`);
+    console.log(`\n · status: running · version: ${packageJson.version} · port: ${port} ·\n`);
 
     if (providers.size > 0) {
-      console.log('registered rpcs:', Array.from(providers.keys()).join(' '));
-    } else {
-      console.log('no custom rpcs registered at startup');
+      console.log('   - registered rpcs:', Array.from(providers.keys()).join(' '));
     }
   });
 }
