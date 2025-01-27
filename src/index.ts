@@ -254,7 +254,12 @@ async function start() {
 
   app.listen(port, () => {
     console.log(`started on port ${port}`);
-    console.log('registered networks:', Array.from(providers.keys()).join(' '));
+
+    if (providers.size > 0) {
+      console.log('registered rpcs:', Array.from(providers.keys()).join(' '));
+    } else {
+      console.log('no custom rpcs registered at startup');
+    }
   });
 }
 
