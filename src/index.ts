@@ -29,6 +29,8 @@ type SafeTransaction = {
 type StagedTransaction = {
   txn: SafeTransaction;
   sigs: string[];
+  createdAt: number;
+  updatedAt: number;
 };
 
 // arbitrary limits to harden the server a bit
@@ -162,7 +164,7 @@ async function start() {
     }
 
     try {
-      const signedTransactionInfo: StagedTransaction = req.body;
+      const signedTransactionInfo: StagedTransaction = _.pick(req.body, ['txn', 'sigs', 'createdAt', 'updatedAt']);
       const provider = getProvider(chainId);
 
       if (!provider) {
@@ -194,6 +196,9 @@ async function start() {
       const currentNonce: bigint = await safe.nonce();
 
       if (!existingTx) {
+        signedTransactionInfo.createdAt = Date.now();
+        signedTransactionInfo.updatedAt = signedTransactionInfo.createdAt;
+
         if (txs.size > MAX_TXNS_STAGED) {
           return res.status(400).send('maximum staged signatures for this safe');
         }
@@ -210,6 +215,9 @@ async function start() {
           return res.status(400).send('proposed nonce is higher than current safe nonce with missing staged');
         }
       } else {
+        signedTransactionInfo.createdAt = existingTx.createdAt || Date.now();
+        signedTransactionInfo.updatedAt = Date.now();
+
         // its possible if two or more people sign transactions at the same time, they will have separate lists, and so they need to be merged together.
         // we also sort the signatures for the user here so that isnt a requirement when submitting signatures to this service
         signedTransactionInfo.sigs = _.sortBy(_.union(signedTransactionInfo.sigs, existingTx.sigs), (signature) => {
